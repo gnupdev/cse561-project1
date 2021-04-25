@@ -3,8 +3,16 @@
 #include <string.h>
 
 
-int arch_rg[67];
-int phy_rg[134];
+int arch_reg[67];
+int phy_reg[134];
+
+int* DE;
+int* RN;
+int* DI;
+int* RR;
+int* execute_list;
+int* WB;
+
 
 int ROB_SIZE = 0;
 int WIDTH = 0;
@@ -19,19 +27,24 @@ void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){
 	WIDTH = input_WIDTH;
 	IQ_SIZE = input_IQ_SIZE;
 
-
-
-
-	memset(arch_rg, 0, sizeof(arch_rg));
-	memset(phy_rg, 0, sizeof(phy_rg));
-	printf("Registers set 0\n");
+	memset(arch_reg, 0, sizeof(arch_reg));
+	memset(phy_reg, 0, sizeof(phy_reg));
+	printf("Architecture and Physical Registers set 0\n");
 	
+	DE = (int*)malloc(sizeof(int) * WIDTH);
+	RN = (int*)malloc(sizeof(int) * WIDTH);
+	DI = (int*)malloc(sizeof(int) * WIDTH);
+	RR = (int*)malloc(sizeof(int) * WIDTH);
+	execute_list = (int*)malloc(sizeof(int) * WIDTH * 5);
+	WB = (int*)malloc(sizeof(int) * WIDTH * 5);
+	printf("Pipeline registers are created!\n");	
+
 	ROB = (int**)malloc(sizeof(int) * ROB_SIZE);	
 
 	for(int i = 0;i < ROB_SIZE; i++){
-		ROB[i] = (int *)malloc(sizeof(int) * 3);
+		ROB[i] = (int *)malloc(sizeof(int) * 3); // [0] = "program counter", [1] = "free reg", [2] = "done"
 	}
-	printf("ROB set\n");
+	printf("ROB is created!\n");
 	return;
 }
 
@@ -43,8 +56,9 @@ void push_ROB(int type, int free_reg){
 void pop_ROB(int how_many){	
 	// Reorder ROB
 	for(int i = 0; i < ROB_SIZE - 1; i++){
-		ROB[i] = ROB[i+how_many];
-		for(int i = 0; i < 3; i++){
+		ROB[i] = ROB[i+how_many]; // move ROB
+		phy_reg[ROB[i][1]] = 0; // free reg
+		for(int i = 0; i < 3; i++){ // clean the ROB
 			ROB[i+how_many][i] = 0;
 		}
 	}
@@ -54,7 +68,6 @@ void pop_ROB(int how_many){
 
 
 void commit(){
-
 	int how_many = 0;
 
 	for(int i = 0; i < WIDTH; i++){
@@ -65,11 +78,16 @@ void commit(){
 			if(how_many != 0) pop_ROB(how_many);
 			break;
 		}
-		
-
 	}
+}
+
+void writeback(){
+	
+
+
 
 }
+
 
 int main(int argc, char *argv[]){
 
