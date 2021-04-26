@@ -6,13 +6,15 @@
 int arch_reg[67];
 int phy_reg[134];
 
-int* DE;
+char** DE;
+int DE_flag = 0;
+
 int* RN;
 int* DI;
 int* RR;
 int** execute_list;
 int* WB;
-
+int now_cycle = 0;
 
 int ROB_SIZE = 0;
 int WIDTH = 0;
@@ -20,7 +22,7 @@ int IQ_SIZE = 0;
 
 int** ROB;
 int now_ROB = -1;
-
+int end_file = 0;
 
 void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){	
 	ROB_SIZE = input_ROB_SIZE;
@@ -31,7 +33,11 @@ void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){
 	memset(phy_reg, 0, sizeof(phy_reg));
 	printf("Architecture and Physical Registers set 0\n");
 	
-	DE = (int*)malloc(sizeof(int) * WIDTH);
+	DE = (char**)malloc(sizeof(char*) * WIDTH);
+	for(int i = 0; i < WIDTH; i++){
+		DE[i] = (char*)malloc(sizeof(char) * 32); // 32 is buffer size
+	}	
+
 	RN = (int*)malloc(sizeof(int) * WIDTH);
 	DI = (int*)malloc(sizeof(int) * WIDTH);
 	RR = (int*)malloc(sizeof(int) * WIDTH);
@@ -41,6 +47,7 @@ void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){
 	}
 
 	WB = (int*)malloc(sizeof(int) * WIDTH * 5);
+	memset(DE, -1, sizeof(DE));
 	memset(WB, -1, sizeof(WB));
 	printf("Pipeline registers are created!\n");	
 
@@ -53,8 +60,8 @@ void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){
 	return;
 }
 
-void push_ROB(int type, int free_reg){
-	ROB[++now_ROB][0] = type;
+void push_ROB(int pc, int free_reg){
+	ROB[++now_ROB][0] = pc;
 	ROB[now_ROB][1] = free_reg;
 	ROB[now_ROB][2] = 0;
 }
@@ -104,18 +111,69 @@ void writeback(){
 }
 
 void execute(){
-	
-	
+	int wb_index = 0;
+	for(int ex_loop = 0; ex_loop < WIDTH * 5; ex_loop++){
+		int check = now_cycle - execute_list[ex_loop][1];
+		if(check == execute_list[ex_loop][2]){
+			WB[wb_index++] = execute_list[0][0];
+			execute_list[ex_loop][0] = -1;
+			execute_list[ex_loop][1] = -1;
+			execute_list[ex_loop][2] = -1;
+		}
+	}	
+}
 
-
+void regRead(){
+	
 
 
 
 }
 
+
+
+
+
+void fetch(FILE* fp){
+	char** buffer = (char**)malloc(sizeof(char*) * WIDTH);
+	for(int i = 0; i < WIDTH; i++){
+		buffer[i] = (char*)malloc(sizeof(char) * 32); // 32 is buffer size
+	}
+
+	FILE* fp_temp = fp;
+	int count = 0;
+
+	for(int i = 0; i < WIDTH; i++){
+		if(!fgets(buffer[i], 32, fp)){
+			printf("The fp locate EOF\n");
+			break;
+		}
+		else {
+			count++;
+		//	printf("%s\n", buffer[i]);
+		}
+	}
+	if(count == WIDTH && DE_flag == 0 && (ROB_SIZE - now_ROB) >= WIDTH){ // Can push ROB and DE Registers
+		DE_flag = 1;
+		memcpy(DE, buffer, sizeof(buffer));
+		for(int i = 0; i < WIDTH; i++){
+			printf("%s\n", buffer[i]);
+		}	
+
+	}
+
+
+
+
+
+
+	// Free buffer
+	for(int i = 0; i <WIDTH; i++){
+		free(buffer[i]);
+	}
+	free(buffer);
+}
 int main(int argc, char *argv[]){
-
-
 
 
 
@@ -137,12 +195,13 @@ int main(int argc, char *argv[]){
 
 	init(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]));
 
-	ROB[0][0] = 100;
-	ROB[0][1] = 1;
-	ROB[0][2] = 3;
+	FILE* fp;
+	fp = fopen(argv[4], "r");
 
-	ROB[1] = ROB[0];
-	printf("%d %d %d\n", ROB[1][0], ROB[1][1], ROB[1][2]);	
+	if(fp == NULL) printf("Can not read input file\n");
+	while(!feof(fp)) {
+		fetch(fp);
+	}
 
 }
 
