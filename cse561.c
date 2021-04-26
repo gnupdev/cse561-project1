@@ -10,7 +10,7 @@ int* DE;
 int* RN;
 int* DI;
 int* RR;
-int* execute_list;
+int** execute_list;
 int* WB;
 
 
@@ -35,8 +35,13 @@ void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){
 	RN = (int*)malloc(sizeof(int) * WIDTH);
 	DI = (int*)malloc(sizeof(int) * WIDTH);
 	RR = (int*)malloc(sizeof(int) * WIDTH);
-	execute_list = (int*)malloc(sizeof(int) * WIDTH * 5);
+	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 5);
+	for(int i = 0; i < WIDTH * 5; i++){
+		execute_list[i] = (int*)malloc(sizeof(int) * 3); // [0] = "program counter", [1] = "strart clock", [2] = execution_time
+	}
+
 	WB = (int*)malloc(sizeof(int) * WIDTH * 5);
+	memset(WB, -1, sizeof(WB));
 	printf("Pipeline registers are created!\n");	
 
 	ROB = (int**)malloc(sizeof(int) * ROB_SIZE);	
@@ -82,12 +87,31 @@ void commit(){
 }
 
 void writeback(){
-	
+	for(int wb_loop = 0; wb_loop < WIDTH * 5; wb_loop++){
+		if(WB[wb_loop] != -1){	
+			for(int rob_loop = 0; rob_loop < ROB_SIZE; rob_loop++){
+				if(ROB[rob_loop][0] == WB[wb_loop]){
+					ROB[rob_loop][2] = 1;
+					break;
+				}
+			}
+			WB[wb_loop] = -1;
+		}
+	}	
 
 
 
 }
 
+void execute(){
+	
+	
+
+
+
+
+
+}
 
 int main(int argc, char *argv[]){
 
@@ -119,7 +143,6 @@ int main(int argc, char *argv[]){
 
 	ROB[1] = ROB[0];
 	printf("%d %d %d\n", ROB[1][0], ROB[1][1], ROB[1][2]);	
-
 
 }
 
