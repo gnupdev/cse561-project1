@@ -3,17 +3,42 @@
 #include <string.h>
 
 
-int arch_reg[67];
-int phy_reg[134];
+int maptable[67];
+int freelist[134];
+int readytable[134];
 
-char** DE;
-int DE_flag = 0;
 
-int* RN;
-int* DI;
-int* RR;
+typedef struct issue_queue {
+	int pc;
+	
+	int op;
+
+	int inp1;
+	int inp1_ready;
+
+	int inp2;
+	int inp2_ready;
+
+	int dst;
+	int bday;		
+}issue_queue;
+int now_issue = 0;
+
+int** DE;
+int** RN;
+int** DI;
+int** RR;
 int** execute_list;
 int* WB;
+
+
+// flag if use ?? Regitsers
+int DE_flag = 0;
+int RN_flag = 0;
+int DI_flag = 0;
+int RR_flag = 0;
+
+
 int now_cycle = 0;
 
 int ROB_SIZE = 0;
@@ -21,55 +46,140 @@ int WIDTH = 0;
 int IQ_SIZE = 0;
 
 int** ROB;
-int now_ROB = -1;
+int now_ROB = 0;
 int end_file = 0;
 
-void init(int input_ROB_SIZE, int input_WIDTH, int input_IQ_SIZE){	
-	ROB_SIZE = input_ROB_SIZE;
-	WIDTH = input_WIDTH;
-	IQ_SIZE = input_IQ_SIZE;
+issue_queue* IQ;
 
-	memset(arch_reg, 0, sizeof(arch_reg));
-	memset(phy_reg, 0, sizeof(phy_reg));
-	printf("Architecture and Physical Registers set 0\n");
+void init(int input_ROB_SIZE, int input_IQ_SIZE, int input_WIDTH){	
+	ROB_SIZE = input_ROB_SIZE;
+	IQ_SIZE = input_IQ_SIZE;
+	WIDTH = input_WIDTH;
+
 	
-	DE = (char**)malloc(sizeof(char*) * WIDTH);
+	DE = (int**)malloc(sizeof(int*) * WIDTH);
+	RN = (int**)malloc(sizeof(int*) * WIDTH);
+	DI = (int**)malloc(sizeof(int*) * WIDTH);
+
+	RR = (int*)malloc(sizeof(int) * WIDTH);
 	for(int i = 0; i < WIDTH; i++){
-		DE[i] = (char*)malloc(sizeof(char) * 32); // 32 is buffer size
+		DE[i] = (int*)malloc(sizeof(int) * 5); // 32 is buffer size
+		RN[i] = (int*)malloc(sizeof(int) * 5);
+		DI[i] = (int*)malloc(sizeof(int) * 6); // + original dst register
+		RR[i] = (int*)malloc(sizeof(int) * 
 	}	
 
-	RN = (int*)malloc(sizeof(int) * WIDTH);
-	DI = (int*)malloc(sizeof(int) * WIDTH);
-	RR = (int*)malloc(sizeof(int) * WIDTH);
 	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 5);
 	for(int i = 0; i < WIDTH * 5; i++){
 		execute_list[i] = (int*)malloc(sizeof(int) * 3); // [0] = "program counter", [1] = "strart clock", [2] = execution_time
 	}
 
-	WB = (int*)malloc(sizeof(int) * WIDTH * 5);
-	memset(DE, -1, sizeof(DE));
+	WB = (int*)malloc(sizeof(int) * WIDTH);
+	//memset(DE, -1, sizeof(DE));
 	memset(WB, -1, sizeof(WB));
 	printf("Pipeline registers are created!\n");	
 
-	ROB = (int**)malloc(sizeof(int) * ROB_SIZE);	
+	ROB = (int**)malloc(sizeof(int*) * ROB_SIZE);	
 
 	for(int i = 0;i < ROB_SIZE; i++){
-		ROB[i] = (int *)malloc(sizeof(int) * 3); // [0] = "program counter", [1] = "free reg", [2] = "done"
+		ROB[i] = (int*)malloc(sizeof(int) * 5); // [0] = "program counter", [1] = "free reg", [2] = "done"
+		ROB[i][1] = -1;
 	}
 	printf("ROB is created!\n");
+
+
+	memset(freelist, -1, sizeof(freelist));
+	memset(readytable, -1, sizeof(readytable));
+	for(int i = 0; i < sizeof(maptable) / 4; i++){
+		maptable[i] = i;
+		readytable[i] = 1;
+		freelist[i] = i + 67;
+	}
+
+	IQ = (issue_queue*)malloc(sizeof(issue_queue) * IQ_SIZE);
+
 	return;
 }
 
-void push_ROB(int pc, int free_reg){
-	ROB[++now_ROB][0] = pc;
-	ROB[now_ROB][1] = free_reg;
-	ROB[now_ROB][2] = 0;
+int flag_bday = 0;
+
+void push_issue(int pc, int op, int inp1, int inp2, int dst){
+
+	IQ[now_issue].pc = pc;
+	IQ[now_issue].op = op;
+
+	IQ[now_issue].inp1 = inp1;
+	if(inp1 == -1) IQ[now_issue].inp1_ready = 1;
+	else IQ[now_issue].inp1_ready = readytable[inp1];
+	
+	IQ[now_issue].inp2 = inp2;
+	if(inp2 == -1) IQ[now_issue].inp2_ready = 1;
+	else IQ[now_issue].inp2_ready = readytable[inp2];
+
+	IQ[now_issue].dst = dst;	
+	IQ[now_issue].bday = flag_bday;
+
+	flag_bday++;
+	now_issue++;
+
 }
+
+issue_queue pop_issue(int bday){
+	issue_queue* temp = (issue_queue*)malloc(sizoef(issue_queue));
+
+	for(int i = 0; i < IQ_SIZE; i++){
+		if(IQ[i].bday == bday){
+			temp.pc = IQ[i].pc;
+			temp.op = IQ[i].op;
+			temp.inp1 = IQ[i].inp1;
+			temp.inp2 = IQ[i].inp2;
+			temp.dst = IQ[i].dst;
+		
+			IQ[i].pc = -1;
+		}
+
+	}
+	now_issue--;
+	return temp;
+}
+
+int num_free = 67;
+void push_freelist(int phy_rg){
+	freelist[num_free++] = phy_rg;
+}
+
+int pop_freelist(){
+	int temp = freelist[0];
+	for(int i = 0; i < (sizeof(freelist) / 4) - 1; i++){
+		freelist[i] = freelist[i+1];
+		freelist[i+1] = -1;
+		num_free--;
+	}
+
+	return temp;
+}
+
+
+
+void push_ROB(int pc){
+	ROB[now_ROB][0] = pc;
+	ROB[now_ROB][2] = 0;
+ 	now_ROB++;	
+}
+
+void push_free_reg(int pc, int free_reg){
+	for(int i = 0; i < ROB_SIZE; i++){
+		if(ROB[i][0] == pc){
+			ROB[i][1] = free_reg;
+		} 
+	}
+}
+
 void pop_ROB(int how_many){	
 	// Reorder ROB
 	for(int i = 0; i < ROB_SIZE - 1; i++){
 		ROB[i] = ROB[i+how_many]; // move ROB
-		phy_reg[ROB[i][1]] = 0; // free reg
+		//phy_reg[ROB[i][1]] = 0; // free reg
 		for(int i = 0; i < 3; i++){ // clean the ROB
 			ROB[i+how_many][i] = 0;
 		}
@@ -123,56 +233,153 @@ void execute(){
 	}	
 }
 
+
 void regRead(){
-	
+}
 
+void issue(){
 
+	int* list = (int*)malloc(sizeof(int) * WIDTH);
+	int num_issue = 0;
+	if(now_issue == 0){
+	}
+	else{	
+		for(int i = 0; i < IQ_SIZE; i++){
+			if(num_issue > WIDTH) break;
+			if(IQ[i].pc != -1 && IQ[i].inp1_ready == 1 && IQ[i].inp2_ready == 1){
+				list[num_issue++] = i;
+			}
+
+		}
+
+	}
 
 }
 
+void dispatch(){
+	int num_dispatch = DI_flag;
+	int remain_iq = IQ_SIZE - now_issue;
+
+	if(num_dispatch > remain_iq || remain_iq == 0 || num_dispatch == 0){
+		return;
+	}
+	else{
+		if(remain_iq < num_dispatch) num_dispatch = remain_iq;
+	
+		for(int di_loop = 0; di_loop < num_dispatch; di_loop++){
+			readytable[DI[di_loop][2]] = 0;
+			push_issue(DI[di_loop][0], DI[di_loop][1], DI[di_loop][3], DI[di_loop][4], DI[di_loop][2]);
+			DI_flag--;
+	
+		}
+	}
+}
 
 
+void renaming(){
+	int num_rename = RN_flag;
 
+	if(DI_flag > 0 || num_rename == 0){
+		return;
+	}
+	else{
+		for(int rn_loop = 0; rn_loop < num_rename; rn_loop++){
+			DI[rn_loop][0] = RN[rn_loop][0];
+			DI[rn_loop][1] = RN[rn_loop][1];
+				if(RN[rn_loop][2] == -1){ // dst
+					DI[rn_loop][2] = -1;	
+				}
+				else{
+					int temp = pop_freelist();
+					push_free_reg(RN[rn_loop][0], RN[rn_loop][2]);
+					maptable[RN[rn_loop][2]] = temp;
+					DI[rn_loop][2] = temp;
+				}
+
+				if (RN[rn_loop][3] == -1) DI[rn_loop][3] = -1;
+				else DI[rn_loop][3] = maptable[RN[rn_loop][3]];
+				
+				if (RN[rn_loop][4] == -1) DI[rn_loop][4] = -1;
+				else DI[rn_loop][4] = maptable[RN[rn_loop][4]];
+			DI_flag++;
+			RN_flag--;
+		}
+	} 
+}
+
+
+void decode(){
+	int num_decode = DE_flag;
+	
+	if(RN_flag > 0 || num_decode == 0){
+		return;	
+	}
+	else{
+		for(int de_loop = 0; de_loop < num_decode; de_loop++){
+			if(DE[de_loop][0] != -1){
+				for(int rn_loop = 0; rn_loop < 5; rn_loop++){
+					RN[de_loop][rn_loop] = DE[de_loop][rn_loop];
+				}	
+			}	
+			RN_flag++;
+			DE_flag--;
+		}
+	}
+
+}
 
 void fetch(FILE* fp){
-	char** buffer = (char**)malloc(sizeof(char*) * WIDTH);
-	for(int i = 0; i < WIDTH; i++){
-		buffer[i] = (char*)malloc(sizeof(char) * 32); // 32 is buffer size
-	}
 
-	FILE* fp_temp = fp;
-	int count = 0;
-
-	for(int i = 0; i < WIDTH; i++){
-		if(!fgets(buffer[i], 32, fp)){
-			printf("The fp locate EOF\n");
-			break;
-		}
-		else {
-			count++;
-		//	printf("%s\n", buffer[i]);
-		}
+	if(DE_flag > 0 || now_ROB == ROB_SIZE || feof(fp) != 0 ){
+		return;
 	}
-	if(count == WIDTH && DE_flag == 0 && (ROB_SIZE - now_ROB) >= WIDTH){ // Can push ROB and DE Registers
-		DE_flag = 1;
-		memcpy(DE, buffer, sizeof(buffer));
-		for(int i = 0; i < WIDTH; i++){
-			printf("%s\n", buffer[i]);
+	else{
+ 		int remain_ROB = ROB_SIZE - now_ROB;
+		int num_fetch = 0;
+		
+		if(remain_ROB >= WIDTH){ // WIDTH 만큼 fetch
+			num_fetch = WIDTH;
 		}	
+		
+		else if(remain_ROB < WIDTH){ // 남아있는 ROB 만큼 fetch
+			num_fetch = remain_ROB;
+		}
+		for(int de_loop = 0; de_loop < num_fetch; de_loop++){
+			for(int in = 0; in < 5; in++){
+				char temp[32];
+				fscanf(fp, "%s", temp);
+				if(in == 0) {
+					DE[de_loop][in] = strtol(temp, NULL, 16);
+				}
+				else {
+					DE[de_loop][in] = atoi(temp);	
+				}
 
+			}
+
+			push_ROB(DE[de_loop][0]);	
+			if(feof(fp) != 0) { // 다음 읽을 inst이 eof 인지 확인
+				end_file=1; 
+				break;
+			}
+	
+			DE_flag++;
+		}
 	}
-
-
-
-
-
-
-	// Free buffer
-	for(int i = 0; i <WIDTH; i++){
-		free(buffer[i]);
-	}
-	free(buffer);
 }
+
+
+//int search_ROB(int pc){
+//	int index = 0;
+//
+//	for(int i = 0; i < ROB_SIZE; i++){
+//		if(	
+//	}
+//
+//
+//	return index;
+//}
+
 int main(int argc, char *argv[]){
 
 
@@ -192,17 +399,49 @@ int main(int argc, char *argv[]){
 	}
 
 
-
 	init(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]));
 
 	FILE* fp;
 	fp = fopen(argv[4], "r");
 
 	if(fp == NULL) printf("Can not read input file\n");
-	while(!feof(fp)) {
+	//while(!feof(fp)) {
+	//	fetch(fp);
+	//}
+
+	while(end_file == 0){
+
+
+
+		issue();
+
+		dispatch();
+
+		renaming();
+	
+		decode();
+
 		fetch(fp);
+		now_cycle++;
 	}
 
+	//printf("%d %d %d\n", DE_flag, RN_flag, DI_flag);
+
+//	for(int i=0;i<IQ_SIZE;i++) {
+//		printf("%d %d %d %d %d %d %d %d\n", IQ[i].pc, IQ[i].op, IQ[i].inp1, IQ[i].inp1_ready
+//							,IQ[i].inp2, IQ[i].inp2_ready, IQ[i].dst, IQ[i].bday);
+	//}
+
+	for(int i = 0; i < DE_flag; i++){
+		for(int j =0; j < 5;j++) {
+			printf("%d ", DE[i][j]);
+		}
+		//printf("%d %d %d %d %d %d %d %d",IQ[i].pc, IQ[i].op, IQ[i].inp1, IQ[i].inp1_ready, IQ[i].inp2, IQ[i].inp2_ready, IQ[i].dst, IQ[i].bday); 
+		printf("\n");
+	}
+	//for(int i = 0 ; i < sizeof(readytable) / 4; i++) printf("%d\n", readytable[i]);
+	//printf("%d\n", ROB[2][1]);
 }
+
 
 
