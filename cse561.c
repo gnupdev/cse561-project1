@@ -37,7 +37,8 @@ int DE_flag = 0;
 int RN_flag = 0;
 int DI_flag = 0;
 int RR_flag = 0;
-
+int EX_flag = 0;
+int WB_flag = 0;
 
 int now_cycle = 0;
 
@@ -60,21 +61,22 @@ void init(int input_ROB_SIZE, int input_IQ_SIZE, int input_WIDTH){
 	DE = (int**)malloc(sizeof(int*) * WIDTH);
 	RN = (int**)malloc(sizeof(int*) * WIDTH);
 	DI = (int**)malloc(sizeof(int*) * WIDTH);
-
-	RR = (int*)malloc(sizeof(int) * WIDTH);
+	RR = (int**)malloc(sizeof(int*) * WIDTH);
+	WB = (int*)malloc(sizeof(int) * WIDTH * 5);
 	for(int i = 0; i < WIDTH; i++){
 		DE[i] = (int*)malloc(sizeof(int) * 5); // 32 is buffer size
 		RN[i] = (int*)malloc(sizeof(int) * 5);
 		DI[i] = (int*)malloc(sizeof(int) * 6); // + original dst register
-		RR[i] = (int*)malloc(sizeof(int) * 
+		RR[i] = (int*)malloc(sizeof(int) * 5);
 	}	
 
 	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 5);
 	for(int i = 0; i < WIDTH * 5; i++){
-		execute_list[i] = (int*)malloc(sizeof(int) * 3); // [0] = "program counter", [1] = "strart clock", [2] = execution_time
+		execute_list[i] = (int*)malloc(sizeof(int) * 4); // [0] = "program counter", [1] = "strart clock", [2] = execution_time, [3] = destination_register
+	
+		execute_list[i][0] = -1;
 	}
 
-	WB = (int*)malloc(sizeof(int) * WIDTH);
 	//memset(DE, -1, sizeof(DE));
 	memset(WB, -1, sizeof(WB));
 	printf("Pipeline registers are created!\n");	
@@ -97,6 +99,11 @@ void init(int input_ROB_SIZE, int input_IQ_SIZE, int input_WIDTH){
 	}
 
 	IQ = (issue_queue*)malloc(sizeof(issue_queue) * IQ_SIZE);
+
+	for(int i = 0; i < IQ_SIZE; i++){
+		IQ[i].pc = -1;
+		IQ[i].bday = -1;
+	}
 
 	return;
 }
@@ -124,23 +131,33 @@ void push_issue(int pc, int op, int inp1, int inp2, int dst){
 
 }
 
-issue_queue pop_issue(int bday){
-	issue_queue* temp = (issue_queue*)malloc(sizoef(issue_queue));
+void pop_issue(int bday, issue_queue* pop){
+	issue_queue temp;
 
 	for(int i = 0; i < IQ_SIZE; i++){
-		if(IQ[i].bday == bday){
+		if(IQ[i].pc != -1 && IQ[i].bday == bday){
 			temp.pc = IQ[i].pc;
 			temp.op = IQ[i].op;
 			temp.inp1 = IQ[i].inp1;
 			temp.inp2 = IQ[i].inp2;
 			temp.dst = IQ[i].dst;
-		
-			IQ[i].pc = -1;
-		}
 
+			memcpy(pop, &temp, sizeof(temp));
+
+			for(int j = i; j < IQ_SIZE - 1; j++){
+				IQ[j].pc = IQ[j+1].pc;
+				IQ[j].op = IQ[j+1].op;
+				IQ[j].inp1 = IQ[j+1].inp1;
+				IQ[j].inp1_ready = IQ[j+1].inp1_ready;
+				IQ[j].inp2 = IQ[j+1].inp2;
+				IQ[j].inp2_ready = IQ[j+1].inp2_ready;
+				IQ[j].dst = IQ[j+1].dst;
+				IQ[j].bday = IQ[j+1].bday;
+				IQ[j+1].pc = -1;
+			}
+		}
 	}
 	now_issue--;
-	return temp;
 }
 
 int num_free = 67;
@@ -179,9 +196,10 @@ void pop_ROB(int how_many){
 	// Reorder ROB
 	for(int i = 0; i < ROB_SIZE - 1; i++){
 		ROB[i] = ROB[i+how_many]; // move ROB
+		push_freelist(ROB[i][1]);
 		//phy_reg[ROB[i][1]] = 0; // free reg
 		for(int i = 0; i < 3; i++){ // clean the ROB
-			ROB[i+how_many][i] = 0;
+			ROB[i+how_many][i] = -1;
 		}
 	}
 	now_ROB = now_ROB - how_many;	
@@ -204,56 +222,114 @@ void commit(){
 }
 
 void writeback(){
-	for(int wb_loop = 0; wb_loop < WIDTH * 5; wb_loop++){
-		if(WB[wb_loop] != -1){	
-			for(int rob_loop = 0; rob_loop < ROB_SIZE; rob_loop++){
-				if(ROB[rob_loop][0] == WB[wb_loop]){
-					ROB[rob_loop][2] = 1;
-					break;
+	if(WB_flag == 0){
+		return;	
+	}
+	else {
+		for(int wb_loop = 0; wb_loop < WIDTH * 5; wb_loop++){
+			if(WB[wb_loop] != -1){	
+				for(int rob_loop = 0; rob_loop < ROB_SIZE; rob_loop++){
+					if(ROB[rob_loop][0] == WB[wb_loop]){
+						ROB[rob_loop][2] = 1;
+						WB[wb_loop] = -1;
+						WB_flag--;
+						break;
+					}
 				}
 			}
-			WB[wb_loop] = -1;
-		}
-	}	
-
-
-
+		}	
+	}
 }
 
 void execute(){
-	int wb_index = 0;
-	for(int ex_loop = 0; ex_loop < WIDTH * 5; ex_loop++){
-		int check = now_cycle - execute_list[ex_loop][1];
-		if(check == execute_list[ex_loop][2]){
-			WB[wb_index++] = execute_list[0][0];
-			execute_list[ex_loop][0] = -1;
-			execute_list[ex_loop][1] = -1;
-			execute_list[ex_loop][2] = -1;
+
+	if(EX_flag == 0){
+		return;
+	}
+	else{
+		for(int ex_loop = 0; ex_loop < WIDTH * 5; ex_loop++){
+			int check = now_cycle - execute_list[ex_loop][1];
+			if(execute_list[ex_loop][0] != -1 && check >= execute_list[ex_loop][2]){
+				for(int wb_loop = 0; wb_loop < WIDTH * 5; wb_loop++){
+					if(WB[wb_loop] == -1){
+						WB[wb_loop] = execute_list[ex_loop][0];
+						readytable[execute_list[ex_loop][3]] = 1;
+	
+	
+						execute_list[ex_loop][0] = -1;
+						execute_list[ex_loop][1] = -1;
+						execute_list[ex_loop][2] = -1;
+						EX_flag--;
+						WB_flag++;
+						break;
+					}
+	
+				}
+			}
 		}
-	}	
+
+	}
+		
 }
 
 
 void regRead(){
+	int remain_ex_list = WIDTH * 5 - EX_flag;
+
+	if(remain_ex_list == 0 || RR_flag == 0){
+		return;
+	}
+	else{
+
+		int num_regRead = 0;
+		for(int rr_loop = 0; rr_loop < WIDTH; rr_loop++){
+			if(RR[rr_loop][0] != -1){
+				num_regRead++;
+				RR_flag--;
+				for(int ex_loop = 0; ex_loop < WIDTH * 5; ex_loop++){
+					if(execute_list[ex_loop][0] == -1){
+						execute_list[ex_loop][0] = RR[rr_loop][0];
+						execute_list[ex_loop][1] = now_cycle;
+						if(RR[rr_loop][1] == 0) execute_list[ex_loop][2] = 1;
+						else if(RR[rr_loop][1] == 1) execute_list[ex_loop][2] = 2;
+						else execute_list[ex_loop][2] = 5;
+						execute_list[ex_loop][3] = RR[rr_loop][4];
+						EX_flag++;
+						break;
+					}
+				}
+			}
+		}
+	}
 }
 
 void issue(){
-
+	issue_queue* pop = (issue_queue*)malloc(sizeof(issue_queue));
 	int* list = (int*)malloc(sizeof(int) * WIDTH);
 	int num_issue = 0;
-	if(now_issue == 0){
+	if(now_issue == 0 || RR_flag != 0){
+		return;
 	}
 	else{	
 		for(int i = 0; i < IQ_SIZE; i++){
 			if(num_issue > WIDTH) break;
-			if(IQ[i].pc != -1 && IQ[i].inp1_ready == 1 && IQ[i].inp2_ready == 1){
-				list[num_issue++] = i;
+			if(IQ[i].pc != -1 && readytable[IQ[i].inp1] == 1 && readytable[IQ[i].inp2] == 1){
+				list[num_issue++] = IQ[i].bday;
 			}
 
 		}
+		for(int i = 0; i < num_issue; i++){
+			pop_issue(list[i], pop);
+
+			RR[i][0] = pop[0].pc;
+			RR[i][1] = pop[0].op;
+			RR[i][2] = pop[0].inp1;
+			RR[i][3] = pop[0].inp2;
+			RR[i][4] = pop[0].dst;
+			RR_flag++;
+		}
 
 	}
-
 }
 
 void dispatch(){
@@ -359,7 +435,7 @@ void fetch(FILE* fp){
 
 			push_ROB(DE[de_loop][0]);	
 			if(feof(fp) != 0) { // 다음 읽을 inst이 eof 인지 확인
-				end_file=1; 
+				end_file = 1;
 				break;
 			}
 	
@@ -408,10 +484,14 @@ int main(int argc, char *argv[]){
 	//while(!feof(fp)) {
 	//	fetch(fp);
 	//}
+	int i = 0;
+	char temp[32];
 
 	while(end_file == 0){
-
-
+		commit();
+		writeback();
+		execute();
+		regRead();
 
 		issue();
 
@@ -423,25 +503,46 @@ int main(int argc, char *argv[]){
 
 		fetch(fp);
 		now_cycle++;
+
+		printf("now_ROB: %d\n WB_flag: %d\n EX_flag: %d\n RR_flag: %d\n now_issue: %d\n DI_flag: %d\n RN_flag: %d\n DE_flag: %d\n", now_ROB, WB_flag, EX_flag, RR_flag, now_issue, DI_flag, RN_flag, DE_flag);
 	}
 
+commit();
+writeback();
+execute();
+regRead();
+issue();
+dispatch();
+renaming();
+decode();
+fetch(fp);
+now_cycle++;
 	//printf("%d %d %d\n", DE_flag, RN_flag, DI_flag);
 
 //	for(int i=0;i<IQ_SIZE;i++) {
 //		printf("%d %d %d %d %d %d %d %d\n", IQ[i].pc, IQ[i].op, IQ[i].inp1, IQ[i].inp1_ready
 //							,IQ[i].inp2, IQ[i].inp2_ready, IQ[i].dst, IQ[i].bday);
-	//}
+//	}
+//
+//	for(int i = 0; i < RR_flag; i++){
+//		for(int j = 0; j < 5; j++){
+//			printf("%d ", RR[i][j]);
+//		}
+//		printf("\n");
+//
+}
 
-	for(int i = 0; i < DE_flag; i++){
-		for(int j =0; j < 5;j++) {
-			printf("%d ", DE[i][j]);
-		}
-		//printf("%d %d %d %d %d %d %d %d",IQ[i].pc, IQ[i].op, IQ[i].inp1, IQ[i].inp1_ready, IQ[i].inp2, IQ[i].inp2_ready, IQ[i].dst, IQ[i].bday); 
-		printf("\n");
-	}
+
+//	for(int i = 0; i < now_issue; i++){
+//		for(int j =0; j < 8;j++) {
+//		//	printf("%d ", DE[i][j]);
+//		}
+//		printf("%d %d %d %d %d %d %d %d",IQ[i].pc, IQ[i].op, IQ[i].inp1, IQ[i].inp1_ready, IQ[i].inp2, IQ[i].inp2_ready, IQ[i].dst, IQ[i].bday); 
+//		printf("\n");
+//	}
 	//for(int i = 0 ; i < sizeof(readytable) / 4; i++) printf("%d\n", readytable[i]);
 	//printf("%d\n", ROB[2][1]);
-}
+
 
 
 
