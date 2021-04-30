@@ -4,7 +4,7 @@
 #include <unistd.h>
 int now_cycle = 0;
 
-int tracer[10000][100];
+int tracer[10000][20];
 
 int maptable[67];
 int freelist[200];
@@ -62,63 +62,6 @@ void init(int input_ROB_SIZE, int input_IQ_SIZE, int input_WIDTH){
 	IQ_SIZE = input_IQ_SIZE;
 	WIDTH = input_WIDTH;
 
-
-	DE = (int**)malloc(sizeof(int*) * WIDTH);
-	RN = (int**)malloc(sizeof(int*) * WIDTH);
-	DI = (int**)malloc(sizeof(int*) * WIDTH);
-	RR = (int**)malloc(sizeof(int*) * WIDTH);
-	WB = (int**)malloc(sizeof(int*) * (WIDTH * 5));
-	for(int i = 0; i < WIDTH; i++){
-		DE[i] = (int*)malloc(sizeof(int) * 6); // 32 is buffer size
-		RN[i] = (int*)malloc(sizeof(int) * 6);
-		DI[i] = (int*)malloc(sizeof(int) * 6); // + original dst register
-		RR[i] = (int*)malloc(sizeof(int) * 7);
-		RR[i][0] = -1;
-	}	
-
-	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 6);
-	for(int i = 0; i < WIDTH * 5; i++){
-		execute_list[i] = (int*)malloc(sizeof(int) * 7); // [0] = "program counter", [1] = "strart clock", [2] = execution_time, [3] = destination_register
-		WB[i] = (int*)malloc(sizeof(int) * 2);
-
-		execute_list[i][0] = -1;
-		execute_list[i][1] = -1;
-		execute_list[i][2] = -1;
-		execute_list[i][3] = -1;
-	}
-
-
-	ROB = (int**)malloc(sizeof(int*) * ROB_SIZE);	
-
-	for(int i = 0;i < ROB_SIZE; i++){
-		ROB[i] = (int*)malloc(sizeof(int) * 3); // [0] = "program counter", [1] = "free reg", [2] = "done"
-		ROB[i][1] = -1;
-		ROB[i][1] = -1;
-		ROB[i][2] = -1;
-	}
-
-
-	memset(freelist, -1, sizeof(freelist));
-	for(int i = 0; i < sizeof(maptable) / 4; i++){
-		maptable[i] = i;
-		freelist[i] = i + 67;
-	}
-
-	IQ = (issue_queue*)malloc(sizeof(issue_queue) * IQ_SIZE);
-
-	for(int i = 0; i < IQ_SIZE; i++){
-		IQ[i].pc = -1;
-		IQ[i].bday = -1;
-	}
-
-	for(int i = 0 ; i < WIDTH * 5; i++) WB[i][0] = -1;
-
-	for(int i = 0; i < 67; i++) {readytable[i] = 1; readytable[i+67] = -1;}
-
-
-	for(int i = 0 ; i < 10000; i ++ ) for(int j = 0 ; j < 100; j ++) tracer[i][j] = -1;
-
-
 	return;
 }
 
@@ -172,7 +115,19 @@ void pop_issue(int bday, issue_queue* pop){
 				IQ[j].dst = IQ[j+1].dst;
 				IQ[j].bday = IQ[j+1].bday;
 				IQ[j].trace = IQ[j+1].trace;
+				
 				IQ[j+1].pc = -1;
+				IQ[j+1].op = -1;
+				IQ[j+1].inp1 = -1;
+				IQ[j+1].inp1_ready = -1;
+				IQ[j+1].inp2 = -1;
+				IQ[j+1].inp2_ready = -1;
+				IQ[j+1].dst = -1;
+				IQ[j+1].bday = -1;
+				IQ[j+1].trace = -1;
+
+
+
 			}
 		}
 	}
@@ -181,12 +136,13 @@ void pop_issue(int bday, issue_queue* pop){
 
 int num_free = 67;
 void push_freelist(int phy_rg){
-	freelist[num_free++] = phy_rg;
+	freelist[num_free] = phy_rg;
+	num_free++;
 }
 
 int pop_freelist(){
 	int temp = freelist[0];
-	for(int i = 0; i < (200) - 1; i++){
+	for(int i = 0; i < (134) - 1; i++){
 		freelist[i] = freelist[i+1];
 		freelist[i+1] = -1;
 	}
@@ -197,10 +153,10 @@ int pop_freelist(){
 
 
 
-void push_ROB(int pc){
+void push_ROB(int pc,int fetch_count){
 	ROB[now_ROB][0] = pc;
 	ROB[now_ROB][2] = -1;
-
+	ROB[now_ROB][3] = fetch_count;
 	now_ROB++;
 }
 
@@ -208,6 +164,7 @@ void push_free_reg(int pc, int free_reg){
 	for(int i = 0; i < ROB_SIZE; i++){
 		if(ROB[i][0] == pc){
 			ROB[i][1] = free_reg;
+			break;
 		} 
 	}
 }
@@ -217,23 +174,27 @@ void pop_ROB(int how_many){
 	//printf("how %d ", how_many);
 	for(int i = 0; i < how_many; i++){
 
-		if(ROB[0][1] >= 0) push_freelist(ROB[0][1]);
+		if(ROB[i][1] >= 0) push_freelist(ROB[i][1]);
 		
 		tracer[num_commit][10] = now_cycle + 1;
-
 
 		for(int j = 0; j <ROB_SIZE -1; j++){
 			//if(ROB[j+1][0] == NULL ) printf("%d sex\n", j);
 			ROB[j][0] = ROB[j+1][0];
 			ROB[j][1] = ROB[j+1][1];
 			ROB[j][2] = ROB[j+1][2];
-			
-		}
+			ROB[j][3] = ROB[j+1][3];
+			ROB[j+1][0] = -1;
+			ROB[j+1][1] = -1;
+			ROB[j+1][2] = -1;
+			ROB[j+1][3] = -1;
+	}
 		num_commit++;
 
 
 	}
 
+	
 
 
 	now_ROB = now_ROB - how_many;	
@@ -268,12 +229,12 @@ void writeback(){
 
 	if(WB_flag <= 0) return;
 	else{
-		for(int i = 0; i < WIDTH*5; i++){
+		for(int i = 0; i < WB_flag; i++){
 			for(int j = 0; j < ROB_SIZE; j++){
-				if(ROB[j][0] == WB[i][0]){
-
+				if(ROB[j][3] == WB[i][1]){
 					ROB[j][2] = 1;
 					tracer[WB[i][1]][9] = now_cycle + 1;
+					break;
 				}
 
 			}
@@ -345,13 +306,14 @@ void execute(){
 
 
 void regRead(){
+
 	int remain_ex_list = WIDTH * 5 - EX_flag;
 	if(RR_flag == 0 || remain_ex_list == 0){
 		return;
 	}
 	else{
 
-		for(int rr_loop = 0; rr_loop < WIDTH; rr_loop++){
+		for(int rr_loop = 0; rr_loop < RR_flag; rr_loop++){
 			if(RR[rr_loop][0] != -1){
 				for(int ex_loop = 0; ex_loop < WIDTH * 5; ex_loop++){
 					if(execute_list[ex_loop][0] == -1){
@@ -366,11 +328,13 @@ void regRead(){
 
 						execute_list[ex_loop][6] = RR[rr_loop][6];
 						tracer[RR[rr_loop][6]][7] = now_cycle + 1;
+							
 						RR[rr_loop][0] = -1;
-
 						break;
 					}
 				}
+	
+		//	for(int i = 0; i < 6;i++) RR[rr_loop][i] = -1;
 			}
 		}
 		RR_flag = 0;
@@ -410,8 +374,9 @@ void issue(){
 			RR_flag++;
 		}
 	}
+	free(pop);
+	free(list);
 }
-int kkk = 0;
 void dispatch(){
 	int remain_iq = IQ_SIZE - now_issue;
 
@@ -421,7 +386,6 @@ void dispatch(){
 	}
 	else{
 
-		kkk += DI_flag;
 		for(int di_loop = 0; di_loop < DI_flag; di_loop++){
 			readytable[DI[di_loop][2]] = -1;
 			push_issue(DI[di_loop][0], DI[di_loop][1], DI[di_loop][3], DI[di_loop][4], DI[di_loop][2], DI[di_loop][6]);
@@ -437,7 +401,7 @@ void dispatch(){
 void renaming(){
 	int num_rename = RN_flag;
 
-	if(DI_flag > 0 || num_rename == 0){
+	if(DI_flag > 0 || num_rename == 0 || num_free <= 0){
 		return;
 	}
 	else{
@@ -527,7 +491,7 @@ void fetch(FILE* fp){
 				fscanf(fp, "%s", temp);
 				if(in == 0) {
 					DE[de_loop][in] = strtol(temp, NULL, 16);
-					push_ROB(DE[de_loop][0]);	
+					push_ROB(DE[de_loop][0], fetch_count);	
 				}
 				else {
 					DE[de_loop][in] = atoi(temp);	
@@ -547,7 +511,7 @@ void fetch(FILE* fp){
 			tracer[fetch_count][12] = DE[de_loop][3];
 			tracer[fetch_count][13] = DE[de_loop][4];
 			tracer[fetch_count][14] = DE[de_loop][2];	
-
+			
 
 
 			fetch_count++;
@@ -593,6 +557,65 @@ int main(int argc, char *argv[]){
 	if(fp == NULL) printf("Can not read input file\n");
 	int pip_reg = 0;
 
+
+	DE = (int**)calloc(WIDTH, sizeof(int*));
+	RN = (int**)calloc(WIDTH, sizeof(int*));
+	DI = (int**)calloc(WIDTH, sizeof(int*));
+	RR = (int**)calloc(WIDTH, sizeof(int*));
+	WB = (int**)calloc(WIDTH*5, sizeof(int*));
+	for(int i = 0; i < WIDTH; i++){
+		DE[i] = (int*)calloc(6, sizeof(int)); // 32 is buffer size
+		RN[i] = (int*)calloc(6, sizeof(int));
+		DI[i] = (int*)calloc(6, sizeof(int)); // + original dst register
+		RR[i] = (int*)calloc(7, sizeof(int));
+		
+
+
+	}	
+
+	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 6);
+	for(int i = 0; i < WIDTH * 5; i++){
+		execute_list[i] = (int*)malloc(sizeof(int) * 7); // [0] = "program counter", [1] = "strart clock", [2] = execution_time, [3] = destination_register
+		WB[i] = (int*)malloc(sizeof(int) * 2);
+
+		execute_list[i][0] = -1;
+		execute_list[i][1] = -1;
+		execute_list[i][2] = -1;
+		execute_list[i][3] = -1;
+	}
+
+
+	ROB = (int**)malloc(sizeof(int*) * (ROB_SIZE + 1));	
+
+	for(int i = 0;i < ROB_SIZE+1; i++){
+		ROB[i] = (int*)malloc(sizeof(int) * 4); // [0] = "program counter", [1] = "free reg", [2] = "done"
+		ROB[i][1] = -1;
+		ROB[i][1] = -1;
+		ROB[i][2] = -1;
+	}
+
+
+	memset(freelist, -1, sizeof(freelist));
+	for(int i = 0; i < sizeof(maptable) / 4; i++){
+		maptable[i] = i;
+		freelist[i] = i + 67;
+	}
+
+	IQ = (issue_queue*)malloc(sizeof(issue_queue) * IQ_SIZE);
+
+	for(int i = 0; i < IQ_SIZE; i++){
+		IQ[i].pc = -1;
+		IQ[i].bday = -1;
+	}
+
+	for(int i = 0 ; i < WIDTH * 5; i++) WB[i][0] = -1;
+
+	for(int i = 0; i < 67; i++) {readytable[i] = 1; readytable[i+67] = -1;}
+
+
+	for(int i = 0 ; i < 10000; i ++ ) for(int j = 0 ; j < 100; j ++) tracer[i][j] = -1;
+
+
 	do{
 		commit();
 		writeback();
@@ -603,6 +626,13 @@ int main(int argc, char *argv[]){
 		renaming();
 		decode();
 		fetch(fp);
+
+		//for (int i = 0; i < 134; i++) printf(" %d \n" , readytable[i]);
+	
+		for(int i = 0 ; i<ROB_SIZE;i++){printf("%d %x %d %d %d\n", ROB[i][3],ROB[i][0], ROB[i][1], ROB[i][2], now_ROB);}
+		printf("%d %d %d %d %d %d %d %d %d\n", DE_flag, RN_flag, DE_flag, now_issue, DI_flag ,RR_flag, EX_flag, WB_flag, CM_flag);
+		printf("\n");
+		//printf("%d %d\n", now_cycle, num_commit);
 
 	}while(check(fp));
 
@@ -633,7 +663,7 @@ tracer[i][9], tracer[i][10]-tracer[i][9]);
 	printf("# Cycles		    = %d  \n", --now_cycle);
 	printf("# Instructions Per Cycle    = %.2f  \n", ((float)num_commit / (float)now_cycle));
 
-
+	fclose(fp);
 
 }
 
