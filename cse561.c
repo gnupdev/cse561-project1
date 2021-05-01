@@ -6,8 +6,10 @@ int now_cycle = 0;
 
 int tracer[10000][20];
 
+
+
 int maptable[67];
-int freelist[200];
+int freelist[134];
 int readytable[134];
 
 
@@ -37,7 +39,6 @@ int** execute_list;
 int** WB;
 
 
-// flag if use ?? Regitsers
 int DE_flag = 0;
 int RN_flag = 0;
 int DI_flag = 0;
@@ -61,6 +62,67 @@ void init(int input_ROB_SIZE, int input_IQ_SIZE, int input_WIDTH){
 	ROB_SIZE = input_ROB_SIZE;
 	IQ_SIZE = input_IQ_SIZE;
 	WIDTH = input_WIDTH;
+	
+	int pip_reg = 0;
+
+
+	DE = (int**)calloc(WIDTH, sizeof(int*));
+	RN = (int**)calloc(WIDTH, sizeof(int*));
+	DI = (int**)calloc(WIDTH, sizeof(int*));
+	RR = (int**)calloc(WIDTH, sizeof(int*));
+	WB = (int**)calloc(WIDTH*5, sizeof(int*));
+	for(int i = 0; i < WIDTH; i++){
+		DE[i] = (int*)calloc(6, sizeof(int)); // 32 is buffer size
+		RN[i] = (int*)calloc(6, sizeof(int));
+		DI[i] = (int*)calloc(6, sizeof(int)); // + original dst register
+		RR[i] = (int*)calloc(7, sizeof(int));
+		
+
+
+	}	
+
+	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 6);
+	for(int i = 0; i < WIDTH * 5; i++){
+		execute_list[i] = (int*)malloc(sizeof(int) * 7); // [0] = "program counter", [1] = "strart clock", [2] = execution_time, [3] = destination_register
+		WB[i] = (int*)malloc(sizeof(int) * 2);
+
+		execute_list[i][0] = -1;
+		execute_list[i][1] = -1;
+		execute_list[i][2] = -1;
+		execute_list[i][3] = -1;
+	}
+
+
+	ROB = (int**)malloc(sizeof(int*) * (ROB_SIZE + 1));	
+
+	for(int i = 0;i < ROB_SIZE+1; i++){
+		ROB[i] = (int*)malloc(sizeof(int) * 4); // [0] = "program counter", [1] = "free reg", [2] = "done"
+		ROB[i][1] = -1;
+		ROB[i][1] = -1;
+		ROB[i][2] = -1;
+	}
+
+
+	memset(freelist, -1, sizeof(freelist));
+	for(int i = 0; i < sizeof(maptable) / 4; i++){
+		maptable[i] = i;
+		freelist[i] = i + 67;
+	}
+
+	IQ = (issue_queue*)malloc(sizeof(issue_queue) * IQ_SIZE);
+
+	for(int i = 0; i < IQ_SIZE; i++){
+		IQ[i].pc = -1;
+		IQ[i].bday = -1;
+	}
+
+	for(int i = 0 ; i < WIDTH * 5; i++) WB[i][0] = -1;
+
+	for(int i = 0; i < 67; i++) {readytable[i] = 1; readytable[i+67] = -1;}
+
+	for(int i = 0 ; i < 10000; i ++ ) for(int j = 0 ; j < 100; j ++) tracer[i][j] = -1;
+
+
 
 	return;
 }
@@ -148,6 +210,11 @@ int pop_freelist(){
 	}
 
 	num_free--;
+
+
+
+
+
 	return temp;
 }
 
@@ -160,18 +227,15 @@ void push_ROB(int pc,int fetch_count){
 	now_ROB++;
 }
 
-void push_free_reg(int pc, int free_reg){
+void push_free_reg(int index, int free_reg){
 	for(int i = 0; i < ROB_SIZE; i++){
-		if(ROB[i][0] == pc){
+		if(ROB[i][3] == index){
 			ROB[i][1] = free_reg;
-			break;
-		} 
+		}
 	}
 }
 
 void pop_ROB(int how_many){
-	// Reorder ROB
-	//printf("how %d ", how_many);
 	for(int i = 0; i < how_many; i++){
 
 		if(ROB[i][1] >= 0) push_freelist(ROB[i][1]);
@@ -179,7 +243,6 @@ void pop_ROB(int how_many){
 		tracer[num_commit][10] = now_cycle + 1;
 
 		for(int j = 0; j <ROB_SIZE -1; j++){
-			//if(ROB[j+1][0] == NULL ) printf("%d sex\n", j);
 			ROB[j][0] = ROB[j+1][0];
 			ROB[j][1] = ROB[j+1][1];
 			ROB[j][2] = ROB[j+1][2];
@@ -204,20 +267,22 @@ int CM_flag = 0;
 void commit(){
 
 	int how_many = 0;
+	CM_flag = 0;
+	for(int i = 0 ; i< ROB_SIZE; i++){
+		if(ROB[i][2] == -1) break;
+		how_many++;
+		if(how_many == WIDTH) break;		
+	}
 
 
-	if(ROB[0][2] == 0) how_many = 0;
-	else if(ROB[0][2] == 1 && ROB[1][2] == -1) how_many = 1; 
-	else if(ROB[0][2] == 1 && ROB[1][2] == 1 && ROB[2][2] == -1) how_many = 2;
-	else if(ROB[0][2] == 1 && ROB[1][2] == 1 && ROB[2][2] == 1) how_many = 3;
 
 	if(how_many != 0) {
 
 		pop_ROB(how_many);
 	}
-	for(int i = 0; i <ROB_SIZE; i++) if(ROB[i][0] != -1 && ROB[i][2] == 1) CM_flag++;
 
 
+	for(int i = 0;i <ROB_SIZE; i++) if(ROB[i][0] != -1 && ROB[i][2] == 1) CM_flag++;
 
 
 
@@ -246,7 +311,7 @@ void writeback(){
 
 void execute(){
 	int m = 0;
-	if(EX_flag == 0 || WB_flag == WIDTH*5){
+	if(EX_flag == 0){
 		return;
 	}
 	else{
@@ -308,12 +373,13 @@ void execute(){
 void regRead(){
 
 	int remain_ex_list = WIDTH * 5 - EX_flag;
-	if(RR_flag == 0 || remain_ex_list == 0){
+	int temp = 0;
+	if(RR_flag == 0 || remain_ex_list < RR_flag){
 		return;
 	}
 	else{
 
-		for(int rr_loop = 0; rr_loop < RR_flag; rr_loop++){
+		for(int rr_loop = 0; rr_loop < WIDTH; rr_loop++){
 			if(RR[rr_loop][0] != -1){
 				for(int ex_loop = 0; ex_loop < WIDTH * 5; ex_loop++){
 					if(execute_list[ex_loop][0] == -1){
@@ -334,17 +400,19 @@ void regRead(){
 					}
 				}
 	
-		//	for(int i = 0; i < 6;i++) RR[rr_loop][i] = -1;
 			}
-		}
 		RR_flag = 0;
+		}
 	}
 }
 void issue(){
 
 	issue_queue* pop = (issue_queue*)malloc(sizeof(issue_queue));
 	int* list = (int*)malloc(sizeof(int) * WIDTH);
-	if(now_issue == 0){
+
+
+
+	if(now_issue == 0 || RR_flag > 0){
 		return;
 	}
 	else{
@@ -352,7 +420,7 @@ void issue(){
 		int num_issue = 0;
 		for(int i = 0; i < IQ_SIZE; i++){
 			if(IQ[i].pc != -1 && IQ[i].inp1_ready == 1 && IQ[i].inp2_ready == 1){
-
+				
 				list[num_issue++] = IQ[i].bday;
 			}
 
@@ -387,7 +455,6 @@ void dispatch(){
 	else{
 
 		for(int di_loop = 0; di_loop < DI_flag; di_loop++){
-			readytable[DI[di_loop][2]] = -1;
 			push_issue(DI[di_loop][0], DI[di_loop][1], DI[di_loop][3], DI[di_loop][4], DI[di_loop][2], DI[di_loop][6]);
 			tracer[DI[di_loop][6]][5] = now_cycle+1;
 
@@ -431,8 +498,12 @@ void renaming(){
 
 				int old = maptable[RN[rn_loop][2]];
 				int temp = pop_freelist();
-				push_free_reg(RN[rn_loop][0], old);
+		
+				
+	
+				push_free_reg(RN[rn_loop][6], old);
 				maptable[RN[rn_loop][2]] = temp;
+				readytable[temp] = -1;
 				DI[rn_loop][2] = temp;
 			}
 
@@ -555,68 +626,7 @@ int main(int argc, char *argv[]){
 	fp = fopen(argv[4], "r");
 
 	if(fp == NULL) printf("Can not read input file\n");
-	int pip_reg = 0;
-
-
-	DE = (int**)calloc(WIDTH, sizeof(int*));
-	RN = (int**)calloc(WIDTH, sizeof(int*));
-	DI = (int**)calloc(WIDTH, sizeof(int*));
-	RR = (int**)calloc(WIDTH, sizeof(int*));
-	WB = (int**)calloc(WIDTH*5, sizeof(int*));
-	for(int i = 0; i < WIDTH; i++){
-		DE[i] = (int*)calloc(6, sizeof(int)); // 32 is buffer size
-		RN[i] = (int*)calloc(6, sizeof(int));
-		DI[i] = (int*)calloc(6, sizeof(int)); // + original dst register
-		RR[i] = (int*)calloc(7, sizeof(int));
-		
-
-
-	}	
-
-	execute_list = (int**)malloc(sizeof(int*) * WIDTH * 6);
-	for(int i = 0; i < WIDTH * 5; i++){
-		execute_list[i] = (int*)malloc(sizeof(int) * 7); // [0] = "program counter", [1] = "strart clock", [2] = execution_time, [3] = destination_register
-		WB[i] = (int*)malloc(sizeof(int) * 2);
-
-		execute_list[i][0] = -1;
-		execute_list[i][1] = -1;
-		execute_list[i][2] = -1;
-		execute_list[i][3] = -1;
-	}
-
-
-	ROB = (int**)malloc(sizeof(int*) * (ROB_SIZE + 1));	
-
-	for(int i = 0;i < ROB_SIZE+1; i++){
-		ROB[i] = (int*)malloc(sizeof(int) * 4); // [0] = "program counter", [1] = "free reg", [2] = "done"
-		ROB[i][1] = -1;
-		ROB[i][1] = -1;
-		ROB[i][2] = -1;
-	}
-
-
-	memset(freelist, -1, sizeof(freelist));
-	for(int i = 0; i < sizeof(maptable) / 4; i++){
-		maptable[i] = i;
-		freelist[i] = i + 67;
-	}
-
-	IQ = (issue_queue*)malloc(sizeof(issue_queue) * IQ_SIZE);
-
-	for(int i = 0; i < IQ_SIZE; i++){
-		IQ[i].pc = -1;
-		IQ[i].bday = -1;
-	}
-
-	for(int i = 0 ; i < WIDTH * 5; i++) WB[i][0] = -1;
-
-	for(int i = 0; i < 67; i++) {readytable[i] = 1; readytable[i+67] = -1;}
-
-
-	for(int i = 0 ; i < 10000; i ++ ) for(int j = 0 ; j < 100; j ++) tracer[i][j] = -1;
-
-
-	do{
+		do{
 		commit();
 		writeback();
 		execute();
@@ -627,12 +637,6 @@ int main(int argc, char *argv[]){
 		decode();
 		fetch(fp);
 
-		//for (int i = 0; i < 134; i++) printf(" %d \n" , readytable[i]);
-	
-		for(int i = 0 ; i<ROB_SIZE;i++){printf("%d %x %d %d %d\n", ROB[i][3],ROB[i][0], ROB[i][1], ROB[i][2], now_ROB);}
-		printf("%d %d %d %d %d %d %d %d %d\n", DE_flag, RN_flag, DE_flag, now_issue, DI_flag ,RR_flag, EX_flag, WB_flag, CM_flag);
-		printf("\n");
-		//printf("%d %d\n", now_cycle, num_commit);
 
 	}while(check(fp));
 
