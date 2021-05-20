@@ -1,15 +1,22 @@
-* 컴파일
-gcc cse561.c -o <output> 
-커맨드를 이용하여 컴파일
+Modeling Out-of-Order Execution Core
+=====================================
+CSE561 Advanced Computer Architecture @ Ajou University (Spring 2021)
 
-* 실행
+The simulator is simplified version.
+
+How to use
+=
+* Compile
+gcc cse561.c -o <output> 
+
+* Execute
 ./<output> <ROB_SIZE> <IQ_SIZE> <WIDTH> <INPUT>
 
-* 출력
-<INPUT>의 실행 결과로 수행한 INSTRUCTION, 총 CYCLE, CPI가 출력
-또한 scopetool의 인풋으로 사용될 trace 내용이 출력
+* Result
+Number of instruction, cycle, cycle per instruction, trace
+(trace will be used to run scope tool)
 
-* 버그
-validation input이 정상적으로 동작하지 않고 있습니다.
+* Bug will be fixed soon..
+The simulator can not provide correct result about validation input
 
 
